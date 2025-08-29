@@ -1,0 +1,117 @@
+version: "3.9"
+
+name: hn-support
+networks: { hn: {} }
+
+volumes:
+  zammad_pg: {}
+  zammad_es: {}
+  openproject_pg: {}
+  qdrant_storage: {}
+
+services:
+  # --- ZAMMAD (Help Desk) ---
+  zammad-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: zammad_production
+      POSTGRES_USER: zammad
+      POSTGRES_PASSWORD: ${ZAMMAD_DB_PASSWORD:-change-me}
+    volumes:
+      - zammad_pg:/var/lib/postgresql/data
+    networks: [hn]
+
+  zammad-es:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.26
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+    sysctls:
+      - vm.max_map_count=262144
+    volumes:
+      - zammad_es:/usr/share/elasticsearch/data
+    networks: [hn]
+
+  zammad:
+    image: zammad/zammad:latest
+    depends_on: [zammad-db, zammad-es]
+    environment:
+      POSTGRESQL_HOST: zammad-db
+      POSTGRESQL_USER: zammad
+      POSTGRESQL_PASS: ${ZAMMAD_DB_PASSWORD:-change-me}
+      POSTGRESQL_DB: zammad_production
+      ELASTICSEARCH_ENABLED: "true"
+      ELASTICSEARCH_HOST: zammad-es
+      ELASTICSEARCH_PORT: 9200
+      ZAMMAD_RAILS_LOG_TO_STDOUT: "true"
+    networks: [hn]
+    ports: ["127.0.0.1:8081:8080"]
+
+  # --- OPENPROJECT (Issues/PM) ---
+  openproject-db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: openproject
+      POSTGRES_PASSWORD: ${OPENPROJECT_DB_PASSWORD:-change-me}
+      POSTGRES_DB: openproject
+    volumes:
+      - openproject_pg:/var/lib/postgresql/data
+    networks: [hn]
+
+  openproject-cache:
+    image: memcached:alpine
+    networks: [hn]
+
+  openproject:
+    image: openproject/community:latest
+    depends_on: [openproject-db, openproject-cache]
+    environment:
+      OPENPROJECT_HTTPS: "false"
+      RAILS_CACHE_STORE: memcache
+      OPENPROJECT_CACHE__MEMCACHE__SERVER: openproject-cache:11211
+      DATABASE_URL: postgres://openproject:${OPENPROJECT_DB_PASSWORD:-change-me}@openproject-db:5432/openproject?pool=20&encoding=unicode&reconnect=true
+    networks: [hn]
+    ports: ["127.0.0.1:8082:8080"]
+
+  # --- vLLM (local OpenAI-compatible LLM server) ---
+  llm:
+    image: vllm/vllm-openai:latest
+    volumes: ["${LLM_MODELS_DIR:-/opt/models}:/models:ro"]
+    command: >
+      python -m vllm.entrypoints.openai.api_server
+      --model ${LLM_MODEL:-/models/llama-3-8b-instruct}
+      --host 0.0.0.0 --port 8000 --dtype auto
+      --served-model-name local-cs
+    # Uncomment if you have NVIDIA GPUs
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ capabilities: ["gpu"], driver: nvidia, count: 1 }]
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    networks: [hn]
+    ports: ["127.0.0.1:8000:8000"]
+
+  # --- QDRANT (vector DB) ---
+  qdrant:
+    image: qdrant/qdrant:latest
+    networks: [hn]
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    ports: ["127.0.0.1:6333:6333"]
+
+  # --- FastAPI Bridge (local tools + chat facade) ---
+  bridge:
+    build: ./bridge
+    depends_on: [zammad, openproject, llm]
+    environment:
+      ZAMMAD_BASE_URL: http://zammad:8080
+      ZAMMAD_TOKEN: ${ZAMMAD_TOKEN:-set-me}
+      OPENPROJECT_BASE_URL: http://openproject:8080
+      OPENPROJECT_API_KEY: ${OPENPROJECT_API_KEY:-set-me}
+      LLM_BASE_URL: http://llm:8000/v1
+    networks: [hn]
+    ports: ["127.0.0.1:8787:8787"]
