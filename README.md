@@ -106,3 +106,43 @@ You can pull from GHCR to other hosts that run the stack.
 - Everything binds to `127.0.0.1` by default (local-only). Expose to LAN by adjusting `ports:`.
 - For GPUs, uncomment the `deploy.resources.reservations.devices` block on the `llm` service and ensure NVIDIA Container Toolkit is installed.
 - Use a real model path in `LLM_MODELS_DIR` and `LLM_MODEL`. The default assumes a local, already-downloaded model folder.
+
+
+## Optional: GPU enable for vLLM
+GPU boxes: add the GPU override file.
+```bash
+docker compose -f docker-compose.yml -f compose.gpu.yml up -d
+```
+(Requires NVIDIA Container Toolkit; this sets `--gpus all` and nudges vLLM to use CUDA.)
+
+## Optional: TLS reverse proxy for LAN
+Generate a wildcard cert and expose everything at `*.hn.local`:
+```bash
+# generate certs (mkcert preferred; falls back to openssl self-signed)
+bash scripts/gen-certs.sh hn.local
+
+# bring up with proxy
+docker compose -f docker-compose.yml -f compose.proxy.yml up -d
+```
+
+Add host entries on your client:
+```
+<HOST_IP> zammad.hn.local openproject.hn.local qdrant.hn.local llm.hn.local bridge.hn.local
+```
+Now open:
+- https://zammad.hn.local
+- https://openproject.hn.local
+- https://qdrant.hn.local
+- https://llm.hn.local
+- https://bridge.hn.local
+
+> With `mkcert`, you can add the generated CA to your OS trust store so browsers accept the cert without warnings.
+
+## Ingest your KB into Qdrant
+Place Markdown/TXT/PDFs under `./kb/` and run the ingestion container:
+```bash
+docker compose -f docker-compose.yml -f compose.ingest.yml build ingest
+docker compose -f docker-compose.yml -f compose.ingest.yml run --rm ingest \
+  --kb-dir /kb --collection kb --recreate
+```
+Change the embedding model by setting `EMBED_MODEL` in your environment or `.env`. Default: `sentence-transformers/all-MiniLM-L6-v2`.

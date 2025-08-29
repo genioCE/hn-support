@@ -1,0 +1,13 @@
+# Enable GPU for the vLLM service.
+# Usage: docker compose -f docker-compose.yml -f compose.gpu.yml up -d
+services:
+  llm:
+    # Compose GPU support (Docker 19.03+ with NVIDIA toolkit)
+    # Equivalent to: --gpus all
+    deploy: {}
+    gpus: all
+    environment:
+      # Optional knobs for vLLM
+      VLLM_WORKER_USE_DEVICE: cuda
+      # e.g. tensor parallel across multiple GPUs (if you have them)
+      TP_SIZE: ${TP_SIZE:-1}

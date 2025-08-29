@@ -1,0 +1,11 @@
+# Adds an ingestion container connected to the hn network.
+# Usage: docker compose -f docker-compose.yml -f compose.ingest.yml run --rm ingest ...
+services:
+  ingest:
+    build: ./ingest
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      EMBED_MODEL: ${EMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    volumes:
+      - ./kb:/kb:ro
+    networks: [hn]

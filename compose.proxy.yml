@@ -1,0 +1,20 @@
+# Add an Nginx TLS reverse proxy that exposes services on LAN via SNI hosts.
+# Usage: docker compose -f docker-compose.yml -f compose.proxy.yml up -d
+# Add host entries on your client machine, e.g.:
+#   192.168.1.10   zammad.hn.local openproject.hn.local qdrant.hn.local llm.hn.local bridge.hn.local
+services:
+  proxy:
+    image: nginx:alpine
+    depends_on:
+      - zammad
+      - openproject
+      - qdrant
+      - llm
+      - bridge
+    volumes:
+      - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./proxy/certs:/etc/nginx/certs:ro
+    networks: [hn]
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
